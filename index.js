@@ -71,7 +71,9 @@ if(!path.isAbsolute(target))
 //now we're going to check whether the path exists, and is a directory
 fs.stat(target, async (err, stats) => {
     if(err)
-        error(err.message);
+        error(err.code == "ENOENT"
+            ? "Please provide a path to an existing directory"
+            : err.message);
 
     if(!stats.isDirectory())
         error("Please provide a path to a directory");
@@ -87,6 +89,7 @@ fs.stat(target, async (err, stats) => {
 });
 
 const groupDeps = deps =>
+    //organize the dependencies by the module, creating lists of files for each one
     deps.reduce((acc, [dep, file]) => {
         // console.log(dep, file)
         if(!acc[dep])
