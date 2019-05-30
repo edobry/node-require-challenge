@@ -46,7 +46,7 @@ const
     //the builtin fs (filesystem) module will allow us to actually interact with files on disk
     fs = require("fs"),
     //this gives us access to a few more convenient APIs
-    fsP = fs.promises,
+    fsP = fs.promises;
 
 //here, i initialize nconf to look for config settings from the commandline, but to use the default value if none is provided
 nconf.argv().defaults({
@@ -80,7 +80,7 @@ fs.stat(target, (err, stats) => {
     parseFolder(target);
 });
 
-const excludedDirs = ["node_modules"];
+const excludedDirs = ["node_modules", ".git"];
 
 const parseFolder = async dir => {
     //since i'm using the fs.promises api, i can `await` the result of the call
@@ -103,7 +103,10 @@ const parseFolder = async dir => {
     const fileValPs = Promise.all(files.map(parseFile(dir)));
 
     //process the subdirectories recursively
-    const subDirs = await Promise.all(dirs.map(parseFolder));
+    const subDirs = await Promise.all(dirs
+        .filter(dir => !excludedDirs.includes(dir))
+        .map(parseFolder));
+
     const fileVals = await fileValPs;
 
     console.log(subDirs);
@@ -113,10 +116,10 @@ const parseFolder = async dir => {
     return [fileVals, ...subDirs];
 };
 
-const parseFile = dir => async name = {
+const parseFile = dir => async name => {
     const contents = await fsP.readFile(`${dir}/${name}`, "utf8");
 
-    const deps = precinct(content);
+    const deps = precinct(contents);
 
     //leaving room here to do any processing if needed
 
