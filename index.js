@@ -69,18 +69,36 @@ if(!path.isAbsolute(target))
 //but i'm going to stick to the very simple, but less convenient, callback api
 
 //now we're going to check whether the path exists, and is a directory
-fs.stat(target, (err, stats) => {
+fs.stat(target, async (err, stats) => {
     if(err)
         error(err.message);
 
     if(!stats.isDirectory())
         error("Please provide a path to a directory");
 
+    console.log(`analyzing target project: ${target}`);
+
     //we're good, so lets get to the actual meat now
-    parseFolder(target);
+    const result = await parseFolder(target);
+    const deps = groupDeps(result);
+
+    console.log(`project has ${Object.keys(deps).length} dependencies`);
+    console.log(deps);
 });
 
+const groupDeps = deps =>
+    deps.reduce((acc, [dep, file]) => {
+        // console.log(dep, file)
+        if(!acc[dep])
+            acc[dep] = [];
+
+        acc[dep].push(file);
+
+        return acc;
+    }, {});
+
 const excludedDirs = ["node_modules", ".git"];
+const includedExtensions = [".js", ".mjs"];
 
 const parseFolder = async dir => {
     //since i'm using the fs.promises api, i can `await` the result of the call
@@ -100,28 +118,33 @@ const parseFolder = async dir => {
     }, { files: [], dirs: [] });
 
     //process each file
-    const fileValPs = Promise.all(files.map(parseFile(dir)));
-
-    //process the subdirectories recursively
-    const subDirs = await Promise.all(dirs
-        .filter(dir => !excludedDirs.includes(dir))
-        .map(parseFolder));
-
-    const fileVals = await fileValPs;
-
-    console.log(subDirs);
-    console.log(fileVals);
+    const [fileVals, subDirs] = await Promise.all([
+        Promise.all(files
+            .filter(file =>
+                includedExtensions.includes(
+                    path.extname(file)))
+            .map(parseFile(dir))),
+        Promise.all(dirs
+            .filter(dir => !excludedDirs.includes(dir))
+            .map(subDir => `${dir}/${subDir}`)
+            //process the subdirectories recursively
+            .map(parseFolder))
+    ]);
 
     //this is definitely wrong but just writing it for now
-    return [fileVals, ...subDirs];
+    return [
+        ...fileVals
+            .flat(1),
+        ...subDirs.flat(1)];
 };
 
-const parseFile = dir => async name => {
-    const contents = await fsP.readFile(`${dir}/${name}`, "utf8");
+const parseFile = dir =>  async name => {
+    const filename = `${dir}/${name}`;
+    const relativeName = filename.replace(`${target}/`, "");
 
-    const deps = precinct(contents);
+    console.log(`reading ${relativeName}`)
+    const content = await fsP.readFile(filename, "utf8");
 
-    //leaving room here to do any processing if needed
-
-    return deps;
-};
+    return precinct(content)
+        .map(dep => [dep, relativeName]);
+}
