@@ -51,7 +51,8 @@ const
 //here, i initialize nconf to look for config settings from the commandline, but to use the default value if none is provided
 nconf.argv().defaults({
     //if no target is specified, just run on this project
-    target: __dirname
+    target: __dirname,
+    quiet: false
 });
 
 //i'm going to setup a very simple error function here, to not have to rewrite this for every error class
@@ -60,8 +61,17 @@ const error = message => {
     process.exit(1);
 };
 
+//since we want to be able to disable logging, we will use a custom logger
+const quietMode = nconf.get("quiet");
+const LOG = message => {
+    if(!quietMode)
+        console.log(message);
+};
+
 //i get the path of the intended target project and validate it
 const target = nconf.get("target");
+if(typeof target != "string")
+    error("Please provide a non-empty string");
 if(!path.isAbsolute(target))
     error("Please provide an absolute path");
 
@@ -78,20 +88,22 @@ fs.stat(target, async (err, stats) => {
     if(!stats.isDirectory())
         error("Please provide a path to a directory");
 
-    console.log(`analyzing target project: ${target}`);
+    LOG(`analyzing target project: ${target}`);
 
-    //we're good, so lets get to the actual meat now
+    //lets get to the actual meat now
     const result = await parseFolder(target);
     const deps = groupDeps(result);
 
-    console.log(`project has ${Object.keys(deps).length} dependencies`);
+    LOG(`project has ${Object.keys(deps).length} dependencies`);
+
+    //the actual output
     console.log(deps);
 });
 
 const groupDeps = deps =>
     //organize the dependencies by the module, creating lists of files for each one
+    //acc == accumulator, fyi
     deps.reduce((acc, [dep, file]) => {
-        // console.log(dep, file)
         if(!acc[dep])
             acc[dep] = [];
 
@@ -100,6 +112,7 @@ const groupDeps = deps =>
         return acc;
     }, {});
 
+//configurable excludes/includes
 const excludedDirs = ["node_modules", ".git"];
 const includedExtensions = [".js", ".mjs"];
 
@@ -110,7 +123,7 @@ const parseFolder = async dir => {
         withFileTypes: true
     });
 
-    //now i partition the directory entries into files and directories
+    //now i partition the directory entries into files and subdirectories
     const { files, dirs } = dirEntries.reduce((acc, entry) => {
         if(entry.isFile())
             acc.files.push(entry.name);
@@ -121,6 +134,7 @@ const parseFolder = async dir => {
     }, { files: [], dirs: [] });
 
     //process each file
+    //structuring it this way allows all work to happen concurrently
     const [fileVals, subDirs] = await Promise.all([
         Promise.all(files
             .filter(file =>
@@ -134,10 +148,8 @@ const parseFolder = async dir => {
             .map(parseFolder))
     ]);
 
-    //this is definitely wrong but just writing it for now
     return [
-        ...fileVals
-            .flat(1),
+        ...fileVals.flat(1),
         ...subDirs.flat(1)];
 };
 
@@ -145,9 +157,12 @@ const parseFile = dir =>  async name => {
     const filename = `${dir}/${name}`;
     const relativeName = filename.replace(`${target}/`, "");
 
-    console.log(`reading ${relativeName}`)
+    LOG(`reading ${relativeName}`)
     const content = await fsP.readFile(filename, "utf8");
 
+    //this package here is saving SO much work
+    //it chooses an appropriate `detective`, each of which handles one type of `require`
+    //detective then uses the acorn JS parser to construct an AST, and then detects
     return precinct(content)
         .map(dep => [dep, relativeName]);
-}
+};
